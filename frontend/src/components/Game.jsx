@@ -2,11 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Container, Paper, Typography, Box, Button, Grid,
-  Card, CardContent, Alert, List, ListItem,
-  ListItemText, Chip, Dialog, DialogTitle,
-  DialogContent, DialogActions, IconButton
+  Card, CardContent, Alert, Chip, LinearProgress,
+  Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material';
-import { Visibility, HowToVote, ExitToApp } from '@mui/icons-material';
+import { Visibility, HowToVote, ExitToApp, SkipNext } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import socketService from '../services/socket';
 import CardDisplay from './CardDisplay';
@@ -14,25 +13,51 @@ import CardDisplay from './CardDisplay';
 function Game() {
   const { roomId } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const [gameData, setGameData] = useState(null);
   const [players, setPlayers] = useState([]);
   const [gameState, setGameState] = useState('playing');
   const [votingTarget, setVotingTarget] = useState(null);
-  const [votingDialogOpen, setVotingDialogOpen] = useState(false);
   const [revealedCards, setRevealedCards] = useState({});
   const [round, setRound] = useState(1);
   const [winner, setWinner] = useState(null);
-  const [eliminatedPlayer, setEliminatedPlayer] = useState(null);
+  const [votingDialogOpen, setVotingDialogOpen] = useState(false);
+  const [voteStatus, setVoteStatus] = useState({ votersCount: 0, aliveCount: 0 });
+  const [votingTimeLeft, setVotingTimeLeft] = useState(null);
+  const [showMessage, setShowMessage] = useState(null);
+  const [gameEndData, setGameEndData] = useState(null);
 
   useEffect(() => {
+    // Get initial game data from sessionStorage or socket
+    const storedGameData = sessionStorage.getItem('gameData');
+    if (storedGameData) {
+      const data = JSON.parse(storedGameData);
+      setGameData(data);
+      setPlayers(data.players || []);
+      sessionStorage.removeItem('gameData');
+    }
+
+    // Reconnect socket if needed
+    if (!socketService.socket || !socketService.socket.connected) {
+      socketService.connect(token);
+      setTimeout(() => {
+        socketService.emit('join-room', {
+          roomId,
+          userId: user.id,
+          username: user.username
+        });
+      }, 100);
+    }
+
     // Socket event listeners
     socketService.on('game-started', (data) => {
+      console.log('Game started event received:', data);
       setGameData(data);
-      setPlayers(data.players);
+      setPlayers(data.players || []);
     });
 
     socketService.on('card-revealed', (data) => {
+      console.log('Card revealed:', data);
       setRevealedCards(prev => ({
         ...prev,
         [`${data.userId}-${data.cardType}`]: data.card
@@ -42,6 +67,8 @@ function Game() {
     socketService.on('voting-started', (data) => {
       setGameState('voting');
       setVotingDialogOpen(true);
+      setVotingTimeLeft(data.votingTime);
+      setVoteStatus({ votersCount: 0, aliveCount: players.filter(p => p.isAlive).length });
     });
 
     socketService.on('vote-cast', (data) => {
@@ -49,14 +76,37 @@ function Game() {
         const voteData = data.votes.find(v => v.userId === p.userId);
         return voteData ? { ...p, votes: voteData.votes } : p;
       }));
+      setVoteStatus({ votersCount: data.votersCount, aliveCount: data.aliveCount });
     });
 
     socketService.on('player-eliminated', (data) => {
-      setEliminatedPlayer(data);
       setPlayers(prev => prev.map(p => 
         p.userId === data.userId ? { ...p, isAlive: false } : p
       ));
-      setTimeout(() => setEliminatedPlayer(null), 5000);
+      setShowMessage({
+        type: 'elimination',
+        text: `${data.username} was eliminated! They were ${data.wasImposter ? 'an IMPOSTER' : 'a CREWMATE'}!`,
+        severity: data.wasImposter ? 'success' : 'warning'
+      });
+      setTimeout(() => setShowMessage(null), 5000);
+    });
+
+    socketService.on('voting-tied', (data) => {
+      setShowMessage({
+        type: 'tie',
+        text: data.message,
+        severity: 'info'
+      });
+      setTimeout(() => setShowMessage(null), 5000);
+    });
+
+    socketService.on('vote-skipped', (data) => {
+      setShowMessage({
+        type: 'skip',
+        text: data.message,
+        severity: 'info'
+      });
+      setTimeout(() => setShowMessage(null), 3000);
     });
 
     socketService.on('new-round', (data) => {
@@ -64,12 +114,14 @@ function Game() {
       setGameState('playing');
       setRevealedCards({});
       setVotingDialogOpen(false);
+      setVotingTarget(null);
       setPlayers(prev => prev.map(p => ({ ...p, votes: 0 })));
     });
 
     socketService.on('game-ended', (data) => {
       setWinner(data.winner);
       setGameState('ended');
+      setGameEndData(data);
     });
 
     return () => {
@@ -78,10 +130,22 @@ function Game() {
       socketService.off('voting-started');
       socketService.off('vote-cast');
       socketService.off('player-eliminated');
+      socketService.off('voting-tied');
+      socketService.off('vote-skipped');
       socketService.off('new-round');
       socketService.off('game-ended');
     };
-  }, []);
+  }, [roomId, user, token, players.length]);
+
+  // Voting timer
+  useEffect(() => {
+    if (votingTimeLeft !== null && votingTimeLeft > 0) {
+      const timer = setTimeout(() => {
+        setVotingTimeLeft(prev => prev - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [votingTimeLeft]);
 
   const handleRevealCard = (cardType) => {
     if (!revealedCards[`${user.id}-${cardType}`]) {
@@ -102,6 +166,15 @@ function Game() {
     setVotingTarget(targetId);
   };
 
+  const handleSkipVote = () => {
+    socketService.emit('vote-player', {
+      roomId,
+      voterId: user.id,
+      targetId: 'skip'
+    });
+    setVotingTarget('skip');
+  };
+
   const handleLeaveGame = () => {
     navigate('/lobby');
   };
@@ -110,7 +183,7 @@ function Game() {
     return (
       <Container maxWidth="lg">
         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 8 }}>
-          <Typography variant="h5">Waiting for game to start...</Typography>
+          <Typography variant="h5">Loading game...</Typography>
         </Box>
       </Container>
     );
@@ -119,56 +192,68 @@ function Game() {
   return (
     <Container maxWidth="lg">
       <Box sx={{ mt: 2 }}>
-        {/* Game Header */}
         <Paper elevation={3} sx={{ p: 2, mb: 2 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Box>
-              <Typography variant="h5">
-                Round {round}
-              </Typography>
+              <Typography variant="h5">Round {round}</Typography>
               <Chip
                 label={gameData.isImposter ? 'IMPOSTER' : 'CREWMATE'}
                 color={gameData.isImposter ? 'error' : 'primary'}
                 sx={{ mt: 1 }}
               />
             </Box>
-            <Typography variant="h6">
-              {gameState === 'playing' && 'Reveal Phase'}
-              {gameState === 'voting' && 'Voting Phase'}
-              {gameState === 'ended' && 'Game Over'}
-            </Typography>
+            <Box textAlign="center">
+              <Typography variant="h6">
+                {gameState === 'playing' && 'Reveal your cards!'}
+                {gameState === 'voting' && 'Vote for the imposter!'}
+                {gameState === 'ended' && 'Game Over'}
+              </Typography>
+              {gameState === 'voting' && votingTimeLeft !== null && (
+                <Box sx={{ mt: 1 }}>
+                  <Typography variant="body2">
+                    Time left: {votingTimeLeft}s | Voted: {voteStatus.votersCount}/{voteStatus.aliveCount}
+                  </Typography>
+                  <LinearProgress 
+                    variant="determinate" 
+                    value={(voteStatus.votersCount / voteStatus.aliveCount) * 100}
+                    sx={{ mt: 0.5 }}
+                  />
+                </Box>
+              )}
+            </Box>
             <Button
               variant="outlined"
               color="error"
               startIcon={<ExitToApp />}
               onClick={handleLeaveGame}
             >
-              Leave Game
+              Leave
             </Button>
           </Box>
         </Paper>
 
-        {/* Alerts */}
-        {eliminatedPlayer && (
-          <Alert severity={eliminatedPlayer.wasImposter ? 'success' : 'warning'} sx={{ mb: 2 }}>
-            {eliminatedPlayer.username} was eliminated! 
-            They were {eliminatedPlayer.wasImposter ? 'an IMPOSTER' : 'a CREWMATE'}!
+        {showMessage && (
+          <Alert severity={showMessage.severity} sx={{ mb: 2 }}>
+            {showMessage.text}
           </Alert>
         )}
 
         {winner && (
           <Alert severity="info" sx={{ mb: 2 }}>
             Game Over! {winner === 'imposters' ? 'Imposters' : 'Crewmates'} Win!
+            {gameEndData && gameEndData.imposters && (
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                Imposters were: {gameEndData.imposters.map(i => i.username).join(', ')}
+              </Typography>
+            )}
           </Alert>
         )}
 
-        {/* Main Game Area */}
         <Grid container spacing={2}>
-          {/* Your Cards */}
           <Grid item xs={12} md={4}>
             <Paper elevation={3} sx={{ p: 2 }}>
               <Typography variant="h6" gutterBottom>Your Cards</Typography>
-              {['troop', 'spell', 'building'].map((cardType) => (
+              {gameData.cards && ['troop', 'spell', 'building'].map((cardType) => (
                 <Card key={cardType} sx={{ mb: 2 }}>
                   <CardContent>
                     <Typography variant="subtitle1" gutterBottom>
@@ -194,10 +279,30 @@ function Game() {
                   </CardContent>
                 </Card>
               ))}
+
+              {gameState === 'voting' && !votingTarget && (
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  color="secondary"
+                  startIcon={<SkipNext />}
+                  onClick={handleSkipVote}
+                  sx={{ mt: 2 }}
+                >
+                  Skip Vote
+                </Button>
+              )}
+
+              {gameState === 'voting' && votingTarget && (
+                <Alert severity="info" sx={{ mt: 2 }}>
+                  {votingTarget === 'skip' 
+                    ? 'You chose to skip voting' 
+                    : `You voted for ${players.find(p => p.userId === votingTarget)?.username}`}
+                </Alert>
+              )}
             </Paper>
           </Grid>
 
-          {/* Players Area */}
           <Grid item xs={12} md={8}>
             <Paper elevation={3} sx={{ p: 2 }}>
               <Typography variant="h6" gutterBottom>Players</Typography>
@@ -209,17 +314,20 @@ function Game() {
                       border: player.userId === user.id ? '2px solid #4169e1' : 'none'
                     }}>
                       <CardContent>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Typography variant="h6">
-                            {player.username}
-                            {!player.isAlive && ' (Eliminated)'}
-                          </Typography>
-                          {gameState === 'voting' && player.votes > 0 && (
-                            <Chip label={`${player.votes} votes`} color="error" size="small" />
-                          )}
-                        </Box>
+                        <Typography variant="h6">
+                          {player.username}
+                          {!player.isAlive && ' (Eliminated)'}
+                        </Typography>
                         
-                        {/* Revealed Cards */}
+                        {gameState === 'voting' && player.votes > 0 && (
+                          <Chip 
+                            label={`${player.votes} vote${player.votes > 1 ? 's' : ''}`} 
+                            color="error" 
+                            size="small" 
+                            sx={{ mt: 1 }}
+                          />
+                        )}
+                        
                         <Box sx={{ mt: 2 }}>
                           {['troop', 'spell', 'building'].map((cardType) => {
                             const cardKey = `${player.userId}-${cardType}`;
@@ -264,7 +372,9 @@ function Game() {
               Discuss and vote who you think the imposter is!
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              You can only vote once. Choose wisely!
+              • You can vote for a player or skip the vote
+              • If votes are tied, no one will be eliminated
+              • Voting ends when everyone votes or time runs out
             </Typography>
           </DialogContent>
           <DialogActions>

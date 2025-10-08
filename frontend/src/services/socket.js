@@ -4,7 +4,7 @@ class SocketService {
   socket = null;
 
   connect(token) {
-    this.socket = io(process.env.REACT_APP_SOCKET_URL || 'http://localhost:5000', {
+    this.socket = io('http://localhost:3600', {
       auth: { token }
     });
 

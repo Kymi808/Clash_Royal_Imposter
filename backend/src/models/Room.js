@@ -27,12 +27,19 @@ const roomSchema = new mongoose.Schema({
       building: { type: Boolean, default: false }
     },
     isAlive: { type: Boolean, default: true },
-    votes: { type: Number, default: 0 }
+    votes: { type: Number, default: 0 },
+    hasVoted: { type: Boolean, default: false },
+    votedFor: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
   }],
   settings: {
-    maxPlayers: { type: Number, default: 10, min: 4, max: 20 },
+    maxPlayers: { type: Number, default: 10, min: 3, max: 11 },
     impostorCount: { type: Number, default: 1, min: 1, max: 3 },
-    votingTime: { type: Number, default: 60 }
+    votingTime: { type: Number, default: 60 },
+    gameMode: { 
+      type: String, 
+      enum: ['troops', 'spells', 'buildings', 'mixed'],
+      default: 'mixed'
+    }
   },
   gameState: {
     type: String,
@@ -43,6 +50,10 @@ const roomSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  votingEndTime: {
+    type: Date,
+    default: null
+  },
   winner: {
     type: String,
     enum: ['imposters', 'crewmates', null],
@@ -51,7 +62,7 @@ const roomSchema = new mongoose.Schema({
   createdAt: {
     type: Date,
     default: Date.now,
-    expires: 7200 // Room expires after 2 hours
+    expires: 7200
   }
 });
 

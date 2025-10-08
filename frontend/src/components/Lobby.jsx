@@ -14,8 +14,9 @@ function Lobby() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [joinDialogOpen, setJoinDialogOpen] = useState(false);
   const [roomCode, setRoomCode] = useState('');
-  const [maxPlayers, setMaxPlayers] = useState(10);
+  const [maxPlayers, setMaxPlayers] = useState(6);
   const [impostorCount, setImpostorCount] = useState(1);
+  const [gameMode, setGameMode] = useState('mixed');
   const [error, setError] = useState('');
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -24,7 +25,8 @@ function Lobby() {
     try {
       const response = await api.post('/rooms/create', {
         maxPlayers,
-        impostorCount
+        impostorCount,
+        gameMode
       });
       navigate(`/room/${response.data.roomId}`);
     } catch (error) {
@@ -150,11 +152,26 @@ function Lobby() {
               onChange={(e) => setMaxPlayers(e.target.value)}
               label="Max Players"
             >
-              {[4, 5, 6, 8, 10, 12, 15, 20].map(n => (
+              {[3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(n => (
                 <MenuItem key={n} value={n}>{n}</MenuItem>
               ))}
             </Select>
           </FormControl>
+          
+          <FormControl fullWidth margin="normal">
+            <InputLabel>Game Mode</InputLabel>
+            <Select
+              value={gameMode}
+              onChange={(e) => setGameMode(e.target.value)}
+              label="Game Mode"
+            >
+              <MenuItem value="mixed">Mixed (Traditional)</MenuItem>
+              <MenuItem value="troops">Troops Only</MenuItem>
+              <MenuItem value="spells">Spells Only</MenuItem>
+              <MenuItem value="buildings">Buildings Only</MenuItem>
+            </Select>
+          </FormControl>
+          
           <FormControl fullWidth margin="normal">
             <InputLabel>Imposters</InputLabel>
             <Select
@@ -163,10 +180,18 @@ function Lobby() {
               label="Imposters"
             >
               {[1, 2, 3].map(n => (
-                <MenuItem key={n} value={n}>{n}</MenuItem>
+                <MenuItem key={n} value={n} disabled={n > Math.floor(maxPlayers / 2)}>
+                  {n} {n > Math.floor(maxPlayers / 2) ? '(Too many for player count)' : ''}
+                </MenuItem>
               ))}
             </Select>
           </FormControl>
+          
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
+            • Mixed: Each slot has different card types (troop, spell, building)<br/>
+            • Single Type: All three slots show the same type of card<br/>
+            • Imposters will always have different cards than crewmates
+          </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setCreateDialogOpen(false)}>Cancel</Button>

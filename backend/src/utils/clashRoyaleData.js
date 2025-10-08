@@ -17,12 +17,41 @@ const buildings = [
   'Collector', 'Goblin Cage'
 ];
 
-function getRandomCards() {
-  return {
-    troop: troops[Math.floor(Math.random() * troops.length)],
-    spell: spells[Math.floor(Math.random() * spells.length)],
-    building: buildings[Math.floor(Math.random() * buildings.length)]
-  };
+function getRandomCards(gameMode = 'mixed') {
+  switch(gameMode) {
+    case 'troops':
+      // All cards are troops
+      return {
+        troop: troops[Math.floor(Math.random() * troops.length)],
+        spell: troops[Math.floor(Math.random() * troops.length)],
+        building: troops[Math.floor(Math.random() * troops.length)]
+      };
+    
+    case 'spells':
+      // All cards are spells
+      return {
+        troop: spells[Math.floor(Math.random() * spells.length)],
+        spell: spells[Math.floor(Math.random() * spells.length)],
+        building: spells[Math.floor(Math.random() * spells.length)]
+      };
+    
+    case 'buildings':
+      // All cards are buildings
+      return {
+        troop: buildings[Math.floor(Math.random() * buildings.length)],
+        spell: buildings[Math.floor(Math.random() * buildings.length)],
+        building: buildings[Math.floor(Math.random() * buildings.length)]
+      };
+    
+    case 'mixed':
+    default:
+      // Original mixed mode
+      return {
+        troop: troops[Math.floor(Math.random() * troops.length)],
+        spell: spells[Math.floor(Math.random() * spells.length)],
+        building: buildings[Math.floor(Math.random() * buildings.length)]
+      };
+  }
 }
 
 module.exports = { getRandomCards, troops, spells, buildings };

@@ -17,41 +17,37 @@ const buildings = [
   'Collector', 'Goblin Cage'
 ];
 
-function getRandomCards(gameMode = 'mixed') {
+function getRandomCard(gameMode = 'mixed') {
+  let cardPool;
+  
   switch(gameMode) {
     case 'troops':
-      // All cards are troops
-      return {
-        troop: troops[Math.floor(Math.random() * troops.length)],
-        spell: troops[Math.floor(Math.random() * troops.length)],
-        building: troops[Math.floor(Math.random() * troops.length)]
-      };
-    
+      cardPool = troops;
+      break;
     case 'spells':
-      // All cards are spells
-      return {
-        troop: spells[Math.floor(Math.random() * spells.length)],
-        spell: spells[Math.floor(Math.random() * spells.length)],
-        building: spells[Math.floor(Math.random() * spells.length)]
-      };
-    
+      cardPool = spells;
+      break;
     case 'buildings':
-      // All cards are buildings
-      return {
-        troop: buildings[Math.floor(Math.random() * buildings.length)],
-        spell: buildings[Math.floor(Math.random() * buildings.length)],
-        building: buildings[Math.floor(Math.random() * buildings.length)]
-      };
-    
+      cardPool = buildings;
+      break;
     case 'mixed':
     default:
-      // Original mixed mode
-      return {
-        troop: troops[Math.floor(Math.random() * troops.length)],
-        spell: spells[Math.floor(Math.random() * spells.length)],
-        building: buildings[Math.floor(Math.random() * buildings.length)]
-      };
+      // In mixed mode, combine all cards
+      cardPool = [...troops, ...spells, ...buildings];
+      break;
   }
+  
+  return cardPool[Math.floor(Math.random() * cardPool.length)];
 }
 
-module.exports = { getRandomCards, troops, spells, buildings };
+// Deprecated - keeping for backwards compatibility
+function getRandomCards(gameMode = 'mixed') {
+  const card = getRandomCard(gameMode);
+  return {
+    troop: card,
+    spell: card,
+    building: card
+  };
+}
+
+module.exports = { getRandomCard, getRandomCards, troops, spells, buildings };

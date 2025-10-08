@@ -13,14 +13,14 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: process.env.CLIENT_URL,
+    origin: process.env.CLIENT_URL || 'http://localhost:3000',
     credentials: true
   }
 });
 
 // Middleware
 app.use(cors({
-  origin: process.env.CLIENT_URL,
+  origin: process.env.CLIENT_URL || 'http://localhost:3000',
   credentials: true
 }));
 app.use(express.json());
@@ -40,25 +40,40 @@ io.on('connection', (socket) => {
 
   socket.on('join-room', async (data) => {
     const { roomId, userId, username } = data;
+    console.log(`User ${username} (${userId}) joining room ${roomId}`);
+    
     socket.join(roomId);
-    socket.userId = userId;
     socket.roomId = roomId;
+    socket.userId = userId;
     socket.username = username;
 
     await gameService.handlePlayerJoin(io, socket, roomId, userId, username);
   });
 
+  socket.on('update-settings', async (data) => {
+    const { roomId, settings } = data;
+    await gameService.updateSettings(io, roomId, settings);
+  });
+
   socket.on('start-game', async (data) => {
     const { roomId, impostorCount } = data;
+    console.log(`Starting game in room ${roomId} with ${impostorCount} imposters`);
     await gameService.startGame(io, roomId, impostorCount);
   });
 
   socket.on('reveal-card', async (data) => {
     const { roomId, userId, cardType } = data;
+    console.log(`Reveal card request - Room: ${roomId}, User: ${userId}, Card: ${cardType}`);
     await gameService.revealCard(io, roomId, userId, cardType);
   });
 
   socket.on('vote-player', async (data) => {
+
+  socket.on("reset-game", async (data) => {
+    const { roomId } = data;
+    await gameService.resetGame(io, roomId);
+  });
+
     const { roomId, voterId, targetId } = data;
     await gameService.handleVote(io, roomId, voterId, targetId);
   });

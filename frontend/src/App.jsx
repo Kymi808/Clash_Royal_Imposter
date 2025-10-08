@@ -2,7 +2,9 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
-import { AuthProvider } from './context/AuthContext';
+import CircularProgress from '@mui/material/CircularProgress';
+import Box from '@mui/material/Box';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
 import Lobby from './components/Lobby';
 import Room from './components/Room';
@@ -27,19 +29,72 @@ const theme = createTheme({
   },
 });
 
+function ProtectedRoute({ children }) {
+  const { isAuthenticated, loading } = useAuth();
+  
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+  
+  if (!isAuthenticated) {
+    return <Navigate to="/login" />;
+  }
+  
+  return children;
+}
+
+function AppRoutes() {
+  const { isAuthenticated } = useAuth();
+  
+  return (
+    <Routes>
+      <Route 
+        path="/login" 
+        element={isAuthenticated ? <Navigate to="/lobby" /> : <Login />} 
+      />
+      <Route 
+        path="/lobby" 
+        element={
+          <ProtectedRoute>
+            <Lobby />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/room/:roomId" 
+        element={
+          <ProtectedRoute>
+            <Room />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/game/:roomId" 
+        element={
+          <ProtectedRoute>
+            <Game />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/" 
+        element={<Navigate to={isAuthenticated ? "/lobby" : "/login"} />} 
+      />
+    </Routes>
+  );
+}
+
 function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <AuthProvider>
         <Router>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/lobby" element={<Lobby />} />
-            <Route path="/room/:roomId" element={<Room />} />
-            <Route path="/game/:roomId" element={<Game />} />
-            <Route path="/" element={<Navigate to="/login" />} />
-          </Routes>
+          <AppRoutes />
         </Router>
       </AuthProvider>
     </ThemeProvider>

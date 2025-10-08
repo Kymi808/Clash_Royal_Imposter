@@ -16,16 +16,8 @@ const roomSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     username: String,
     isImposter: { type: Boolean, default: false },
-    cards: {
-      troop: String,
-      spell: String,
-      building: String
-    },
-    revealedCards: {
-      troop: { type: Boolean, default: false },
-      spell: { type: Boolean, default: false },
-      building: { type: Boolean, default: false }
-    },
+    card: String,  // Changed from cards object to single card
+    hasRevealed: { type: Boolean, default: false },
     isAlive: { type: Boolean, default: true },
     votes: { type: Number, default: 0 },
     hasVoted: { type: Boolean, default: false },

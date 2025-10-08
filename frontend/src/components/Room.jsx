@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Container, Paper, Typography, Box, Button,
@@ -22,6 +22,8 @@ function Room() {
   const [showSettings, setShowSettings] = useState(false);
   const [gameMode, setGameMode] = useState('mixed');
   const [impostorCount, setImpostorCount] = useState(1);
+  const hasJoined = useRef(false);
+  const isNavigating = useRef(false);
 
   useEffect(() => {
     const initRoom = async () => {
@@ -32,17 +34,30 @@ function Room() {
         setImpostorCount(response.data.settings.impostorCount || 1);
         setLoading(false);
 
-        // Connect to socket
-        socketService.connect(token);
-        
-        // Join room after connection
-        setTimeout(() => {
+        // Connect socket only once
+        if (!socketService.connected) {
+          socketService.connect(token);
+          
+          // Wait for connection before joining room
+          setTimeout(() => {
+            if (!hasJoined.current) {
+              hasJoined.current = true;
+              socketService.emit('join-room', {
+                roomId,
+                userId: user.id,
+                username: user.username
+              });
+            }
+          }, 200);
+        } else if (!hasJoined.current) {
+          // Already connected, just join the room
+          hasJoined.current = true;
           socketService.emit('join-room', {
             roomId,
             userId: user.id,
             username: user.username
           });
-        }, 100);
+        }
 
         // Socket event listeners
         socketService.on('player-joined', (data) => {
@@ -73,9 +88,13 @@ function Room() {
         });
 
         socketService.on('game-started', (data) => {
-          console.log('Game started! Navigating to game...', data);
-          sessionStorage.setItem('gameData', JSON.stringify(data));
-          navigate(`/game/${roomId}`);
+          if (!isNavigating.current) {
+            isNavigating.current = true;
+            console.log('Game started! Navigating to game...', data);
+            sessionStorage.setItem('gameData', JSON.stringify(data));
+            sessionStorage.setItem('roomId', roomId);
+            navigate(`/game/${roomId}`);
+          }
         });
 
         socketService.on('game-state-update', (data) => {
@@ -86,6 +105,17 @@ function Room() {
           console.log('Game error:', data);
           setError(data.message);
         });
+
+        socketService.on('your-cards', (data) => {
+          if (!isNavigating.current) {
+            isNavigating.current = true;
+            console.log('Received cards, navigating to game...', data);
+            sessionStorage.setItem('myCards', JSON.stringify(data.cards));
+            sessionStorage.setItem('roomId', roomId);
+            navigate(`/game/${roomId}`);
+          }
+        });
+
       } catch (error) {
         console.error('Room init error:', error);
         setError('Failed to load room');
@@ -96,8 +126,19 @@ function Room() {
     initRoom();
 
     return () => {
-      socketService.emit('leave-room');
-      socketService.disconnect();
+      // Cleanup
+      socketService.off('player-joined');
+      socketService.off('settings-updated');
+      socketService.off('player-left');
+      socketService.off('game-started');
+      socketService.off('game-state-update');
+      socketService.off('game-error');
+      socketService.off('your-cards');
+      
+      // Only leave room if not navigating to game
+      if (!isNavigating.current) {
+        socketService.emit('leave-room');
+      }
     };
   }, [roomId, token, user, navigate]);
 
@@ -128,6 +169,8 @@ function Room() {
   };
 
   const handleLeaveRoom = () => {
+    socketService.emit('leave-room');
+    socketService.disconnect();
     navigate('/lobby');
   };
 

@@ -1,5 +1,6 @@
 const Room = require('../models/Room');
-const { getRandomCards } = require('../utils/clashRoyaleData');
+const User = require('../models/User');
+const { getRandomCard } = require('../utils/clashRoyaleData');
 
 class GameService {
   constructor() {
@@ -11,6 +12,36 @@ class GameService {
       const room = await Room.findById(roomId);
       if (!room) return;
 
+      // Check if game is already in progress
+      if (room.gameState === 'playing' || room.gameState === 'voting') {
+        const player = room.players.find(p => p.userId.toString() === userId);
+        
+        if (player && player.card) {
+          console.log(`Sending card to rejoining player ${username}`);
+          
+          // Send their card to the rejoining player
+          socket.emit('your-card', {
+            card: player.card
+          });
+
+          // Send game state
+          socket.emit('game-state-update', {
+            gameState: room.gameState,
+            round: room.currentRound,
+            gameMode: room.settings.gameMode
+          });
+
+          // Send who has revealed (but NOT their cards)
+          const revealedPlayers = room.players
+            .filter(p => p.hasRevealed)
+            .map(p => p.userId);
+          
+          socket.emit('revealed-players', {
+            revealedPlayers
+          });
+        }
+      }
+
       io.to(roomId).emit('player-joined', {
         players: room.players,
         newPlayer: { userId, username },
@@ -18,22 +49,6 @@ class GameService {
       });
     } catch (error) {
       console.error('Error handling player join:', error);
-    }
-  }
-
-  async updateSettings(io, roomId, settings) {
-    try {
-      const room = await Room.findById(roomId);
-      if (!room) return;
-
-      Object.assign(room.settings, settings);
-      await room.save();
-
-      io.to(roomId).emit('settings-updated', {
-        settings: room.settings
-      });
-    } catch (error) {
-      console.error('Error updating settings:', error);
     }
   }
 
@@ -45,72 +60,75 @@ class GameService {
         return;
       }
 
-      // Allow 3 players minimum
       if (room.players.length < 3) {
         io.to(roomId).emit('game-error', { message: 'Need at least 3 players to start' });
         return;
       }
 
-      // Adjust imposter count if necessary
       const maxImposters = Math.floor(room.players.length / 2);
       const actualImpostorCount = Math.min(impostorCount, maxImposters);
 
-      // Randomly select imposters
       const playerIndices = [...Array(room.players.length).keys()];
       const shuffled = playerIndices.sort(() => Math.random() - 0.5);
       const imposterIndices = shuffled.slice(0, actualImpostorCount);
 
-      // Get game mode from room settings
       const gameMode = room.settings.gameMode || 'mixed';
       console.log(`Starting game with mode: ${gameMode}, imposters: ${actualImpostorCount}`);
 
-      // Assign cards based on game mode
-      const imposterCards = getRandomCards(gameMode);
-      const crewmateCards = getRandomCards(gameMode);
-
-      // Make sure imposters have different cards than crewmates
-      while (JSON.stringify(imposterCards) === JSON.stringify(crewmateCards)) {
-        crewmateCards = getRandomCards(gameMode);
+      // Get cards for imposters and crewmates
+      const imposterCard = getRandomCard(gameMode);
+      let crewmateCard = getRandomCard(gameMode);
+      
+      // Make sure imposters have different card
+      while (imposterCard === crewmateCard) {
+        crewmateCard = getRandomCard(gameMode);
       }
 
-      room.players.forEach((player, index) => {
-        player.isImposter = imposterIndices.includes(index);
-        player.cards = player.isImposter ? imposterCards : crewmateCards;
-        player.revealedCards = {
-          troop: false,
-          spell: false,
-          building: false
-        };
+      // Assign cards to players and increment games played
+      for (let i = 0; i < room.players.length; i++) {
+        const player = room.players[i];
+        player.isImposter = imposterIndices.includes(i);
+        player.card = player.isImposter ? imposterCard : crewmateCard;
+        player.hasRevealed = false;
         player.isAlive = true;
         player.votes = 0;
         player.hasVoted = false;
         player.votedFor = null;
-      });
+
+        // Increment games played for each player
+        await User.findByIdAndUpdate(player.userId, {
+          $inc: { 'stats.gamesPlayed': 1 }
+        });
+      }
 
       room.gameState = 'playing';
       room.currentRound = 1;
+      room.winner = null;
       await room.save();
 
-      // Send game start event with player-specific data
+      // Send game start
+      io.to(roomId).emit('game-started', {
+        players: room.players.map(p => ({
+          userId: p.userId,
+          username: p.username,
+          isAlive: p.isAlive,
+          hasRevealed: p.hasRevealed
+        })),
+        actualImpostorCount: actualImpostorCount,
+        gameMode: gameMode
+      });
+
+      // Send individual cards to each player
       for (const player of room.players) {
-        const playerSocket = [...io.sockets.sockets.values()]
-          .find(s => s.userId === player.userId.toString());
+        const playerSockets = [...io.sockets.sockets.values()]
+          .filter(s => s.userId === player.userId.toString());
         
-        if (playerSocket) {
-          playerSocket.emit('game-started', {
-            isImposter: player.isImposter,
-            cards: player.cards,
-            players: room.players.map(p => ({
-              userId: p.userId,
-              username: p.username,
-              isAlive: p.isAlive,
-              revealedCards: p.revealedCards
-            })),
-            actualImpostorCount: actualImpostorCount,
-            gameMode: gameMode
+        playerSockets.forEach(socket => {
+          console.log(`Sending card to ${player.username}: ${player.card}`);
+          socket.emit('your-card', {
+            card: player.card
           });
-          console.log(`Sent game-started to ${player.username} with cards:`, player.cards);
-        }
+        });
       }
 
       io.to(roomId).emit('game-state-update', {
@@ -118,15 +136,17 @@ class GameService {
         round: room.currentRound,
         gameMode: gameMode
       });
+
+      console.log('Game started successfully');
     } catch (error) {
       console.error('Error starting game:', error);
       io.to(roomId).emit('game-error', { message: 'Failed to start game' });
     }
   }
 
-  async revealCard(io, roomId, userId, cardType) {
+  async revealCard(io, roomId, userId) {
     try {
-      console.log(`Revealing card - Room: ${roomId}, User: ${userId}, CardType: ${cardType}`);
+      console.log(`RevealCard called - Room: ${roomId}, User: ${userId}`);
       
       const room = await Room.findById(roomId);
       if (!room) {
@@ -141,7 +161,7 @@ class GameService {
 
       const player = room.players.find(p => p.userId.toString() === userId);
       if (!player) {
-        console.log('Player not found');
+        console.log(`Player not found for userId: ${userId}`);
         return;
       }
       
@@ -150,39 +170,30 @@ class GameService {
         return;
       }
 
-      if (!player.cards || !player.cards[cardType]) {
-        console.log('Player cards not found:', player.cards);
+      if (player.hasRevealed) {
+        console.log('Card already revealed');
         return;
       }
 
-      if (!player.revealedCards[cardType]) {
-        player.revealedCards[cardType] = true;
-        await room.save();
+      player.hasRevealed = true;
+      await room.save();
 
-        console.log(`Card revealed: ${player.cards[cardType]}`);
-        
-        io.to(roomId).emit('card-revealed', {
-          userId,
-          cardType,
-          card: player.cards[cardType],
-          username: player.username
-        });
+      console.log(`${player.username} revealed their card (privately)`);
+      
+      // Only tell everyone that the player revealed, NOT what their card is
+      io.to(roomId).emit('player-revealed', {
+        userId: player.userId,
+        username: player.username
+      });
 
-        // Check if discussion phase should start
-        const allRevealed = room.players
-          .filter(p => p.isAlive)
-          .every(p => 
-            p.revealedCards.troop || 
-            p.revealedCards.spell || 
-            p.revealedCards.building
-          );
+      // Check if all alive players have revealed
+      const allRevealed = room.players
+        .filter(p => p.isAlive)
+        .every(p => p.hasRevealed);
 
-        if (allRevealed) {
-          console.log('All cards revealed, starting voting phase');
-          this.startVotingPhase(io, roomId);
-        }
-      } else {
-        console.log('Card already revealed');
+      if (allRevealed) {
+        console.log('All players have revealed, starting voting phase');
+        setTimeout(() => this.startVotingPhase(io, roomId), 2000);
       }
     } catch (error) {
       console.error('Error revealing card:', error);
@@ -251,6 +262,11 @@ class GameService {
         target.votes++;
         voter.hasVoted = true;
         voter.votedFor = target.userId;
+
+        // Increment total votes stat
+        await User.findByIdAndUpdate(voterId, {
+          $inc: { 'stats.totalVotes': 1 }
+        });
       }
 
       await room.save();
@@ -289,8 +305,7 @@ class GameService {
 
       const alivePlayers = room.players.filter(p => p.isAlive);
       let maxVotes = 0;
-      let eliminatedPlayers = [];
-
+      
       alivePlayers.forEach(player => {
         if (player.votes > maxVotes) {
           maxVotes = player.votes;
@@ -303,7 +318,6 @@ class GameService {
         if (playersWithMaxVotes.length === 1) {
           const eliminatedPlayer = playersWithMaxVotes[0];
           eliminatedPlayer.isAlive = false;
-          eliminatedPlayers = [eliminatedPlayer];
           
           io.to(roomId).emit('player-eliminated', {
             userId: eliminatedPlayer.userId,
@@ -328,24 +342,57 @@ class GameService {
       if (aliveImposters.length === 0) {
         room.gameState = 'ended';
         room.winner = 'crewmates';
+        
+        // Update win stats for crewmates
+        for (const player of room.players) {
+          if (!player.isImposter) {
+            await User.findByIdAndUpdate(player.userId, {
+              $inc: { 'stats.gamesWonAsCrewmate': 1 }
+            });
+          }
+        }
+
         io.to(roomId).emit('game-ended', { 
           winner: 'crewmates',
           imposters: room.players.filter(p => p.isImposter).map(p => ({
             userId: p.userId,
             username: p.username
+          })),
+          allCards: room.players.map(p => ({
+            userId: p.userId,
+            username: p.username,
+            card: p.card,
+            wasImposter: p.isImposter
           }))
         });
       } else if (aliveImposters.length >= aliveCrewmates.length) {
         room.gameState = 'ended';
         room.winner = 'imposters';
+        
+        // Update win stats for imposters
+        for (const player of room.players) {
+          if (player.isImposter) {
+            await User.findByIdAndUpdate(player.userId, {
+              $inc: { 'stats.gamesWonAsImposter': 1 }
+            });
+          }
+        }
+
         io.to(roomId).emit('game-ended', { 
           winner: 'imposters',
           imposters: room.players.filter(p => p.isImposter).map(p => ({
             userId: p.userId,
             username: p.username
+          })),
+          allCards: room.players.map(p => ({
+            userId: p.userId,
+            username: p.username,
+            card: p.card,
+            wasImposter: p.isImposter
           }))
         });
       } else {
+        // Continue to next round
         room.gameState = 'playing';
         room.currentRound++;
         room.votingEndTime = null;
@@ -354,11 +401,7 @@ class GameService {
           p.hasVoted = false;
           p.votedFor = null;
           if (p.isAlive) {
-            p.revealedCards = {
-              troop: false,
-              spell: false,
-              building: false
-            };
+            p.hasRevealed = false;
           }
         });
 
@@ -370,6 +413,43 @@ class GameService {
       await room.save();
     } catch (error) {
       console.error('Error ending voting:', error);
+    }
+  }
+
+  async resetGame(io, roomId) {
+    try {
+      const room = await Room.findById(roomId);
+      if (!room) return;
+
+      // Reset room to waiting state
+      room.gameState = 'waiting';
+      room.currentRound = 0;
+      room.winner = null;
+      room.votingEndTime = null;
+
+      // Reset all players
+      room.players.forEach(p => {
+        p.isImposter = false;
+        p.card = null;
+        p.hasRevealed = false;
+        p.isAlive = true;
+        p.votes = 0;
+        p.hasVoted = false;
+        p.votedFor = null;
+      });
+
+      await room.save();
+
+      io.to(roomId).emit('game-reset', {
+        players: room.players.map(p => ({
+          userId: p.userId,
+          username: p.username
+        }))
+      });
+
+      console.log(`Game reset for room ${roomId}`);
+    } catch (error) {
+      console.error('Error resetting game:', error);
     }
   }
 
@@ -396,6 +476,22 @@ class GameService {
       io.to(roomId).emit('player-left', { userId });
     } catch (error) {
       console.error('Error handling player leave:', error);
+    }
+  }
+
+  async updateSettings(io, roomId, settings) {
+    try {
+      const room = await Room.findById(roomId);
+      if (!room) return;
+
+      Object.assign(room.settings, settings);
+      await room.save();
+
+      io.to(roomId).emit('settings-updated', {
+        settings: room.settings
+      });
+    } catch (error) {
+      console.error('Error updating settings:', error);
     }
   }
 }

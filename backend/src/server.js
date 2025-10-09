@@ -14,8 +14,12 @@ const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
     origin: process.env.CLIENT_URL || 'http://localhost:3000',
-    credentials: true
-  }
+    methods: ['GET', 'POST'],
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization']
+  },
+  transports: ['polling', 'websocket'], // Allow both
+  allowEIO3: true // Compatibility flag
 });
 
 // Middleware

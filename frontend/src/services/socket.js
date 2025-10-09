@@ -4,36 +4,42 @@ class SocketService {
   socket = null;
   connected = false;
 
-  connect(token) {
-    // Prevent multiple connections
+    connect(token) {
     if (this.socket && this.connected) {
-      console.log('Socket already connected');
-      return this.socket;
+        console.log('Socket already connected');
+        return this.socket;
     }
 
-    // Disconnect any existing socket first
     if (this.socket) {
-      this.socket.disconnect();
+        this.socket.disconnect();
     }
 
     const socketUrl = process.env.REACT_APP_SOCKET_URL || 'http://localhost:3600';
     
     this.socket = io(socketUrl, {
-      auth: { token }
+        auth: { token },
+        transports: ['polling'], // Force polling only, skip WebSocket
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionAttempts: 10
     });
 
     this.socket.on('connect', () => {
-      console.log('Connected to server');
-      this.connected = true;
+        console.log('Connected to server via polling');
+        this.connected = true;
     });
 
     this.socket.on('disconnect', () => {
-      console.log('Disconnected from server');
-      this.connected = false;
+        console.log('Disconnected from server');
+        this.connected = false;
+    });
+
+    this.socket.on('connect_error', (error) => {
+        console.error('Connection error:', error.message);
     });
 
     return this.socket;
-  }
+    }
 
   disconnect() {
     if (this.socket) {

@@ -88,10 +88,29 @@ function AppRoutes() {
   );
 }
 
+function DemoBanner() {
+  if (!import.meta.env.VITE_API_URL) {
+    return (
+      <Box sx={{
+        position: 'fixed', top: 0, left: 0, right: 0, zIndex: 2000,
+        bgcolor: 'warning.dark', color: 'warning.contrastText',
+        py: 0.75, px: 2, textAlign: 'center', fontSize: 13,
+      }}>
+        UI demo only — multiplayer backend not deployed. Code on{' '}
+        <Box component="a" href="https://github.com/Kymi808/Clash_Royal_Imposter" target="_blank" rel="noreferrer" sx={{ color: 'inherit', textDecoration: 'underline' }}>
+          GitHub
+        </Box>.
+      </Box>
+    );
+  }
+  return null;
+}
+
 function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
+      <DemoBanner />
       <AuthProvider>
         <Router>
           <AppRoutes />

@@ -13,7 +13,7 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:3000',
+    origin: process.env.CLIENT_URL || 'http://192.168.1.66:3000',
     methods: ['GET', 'POST'],
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization']
@@ -24,7 +24,7 @@ const io = socketIo(server, {
 
 // Middleware
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  origin: process.env.CLIENT_URL || 'http://192.168.1.66:3000',
   credentials: true
 }));
 app.use(express.json());
@@ -72,14 +72,13 @@ io.on('connection', (socket) => {
   });
 
   socket.on('vote-player', async (data) => {
-
-  socket.on("reset-game", async (data) => {
-    const { roomId } = data;
-    await gameService.resetGame(io, roomId);
-  });
-
     const { roomId, voterId, targetId } = data;
     await gameService.handleVote(io, roomId, voterId, targetId);
+  });
+
+  socket.on('reset-game', async (data) => {
+    const { roomId } = data;
+    await gameService.resetGame(io, roomId);
   });
 
   socket.on('leave-room', async () => {

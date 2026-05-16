@@ -14,7 +14,7 @@ class SocketService {
         this.socket.disconnect();
     }
 
-    const socketUrl = process.env.REACT_APP_SOCKET_URL || 'http://localhost:3600';
+    const socketUrl = import.meta.env.VITE_SOCKET_URL || 'http://192.168.1.66:3600';
     
     this.socket = io(socketUrl, {
         auth: { token },

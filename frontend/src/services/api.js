@@ -4,9 +4,9 @@ import axios from 'axios';
 const storage = window.sessionStorage;
 
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL 
-    ? `${process.env.REACT_APP_API_URL}/api` 
-    : 'http://localhost:3600/api',
+  baseURL: import.meta.env.VITE_API_URL
+    ? `${import.meta.env.VITE_API_URL}/api`
+    : 'http://192.168.1.66:3600/api',
   headers: {
     'Content-Type': 'application/json',
   },
